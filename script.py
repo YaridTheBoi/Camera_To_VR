@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import os.path as path
+
 from flask import Flask, Response
 
 
@@ -8,12 +8,7 @@ from flask import Flask, Response
 fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
 frame_size = (640, 480)  # Przyjmujemy rozmiar klatki 640x480 pikseli
 
-
 new_height = frame_size[1]
-new_widht = new_height*2
-
-new_framesize = (new_widht, new_height)
-
 
 
 center = (new_height // 2, new_height // 2)
@@ -44,14 +39,7 @@ map_x = new_x
 map_y = new_y
 
 
-
-
-
 app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "Strumień wideo jest aktywny. Otwórz adres http://localhost:5000/stream w przeglądarce internetowej lub w odtwarzaczu VLC."
 
 def gen():
     cap = cv2.VideoCapture(0)
@@ -75,8 +63,8 @@ def gen():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-@app.route('/stream')
-def stream():
+@app.route('/')
+def index():
     return Response(gen(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 

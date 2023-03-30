@@ -3,7 +3,8 @@ import numpy as np
 from flask import Flask, Response
 import validators as vali
 import requests 
-
+import os
+from multiprocessing import Process
 
 
 fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
@@ -53,6 +54,14 @@ def detectQR(frame):
         return value, points[0]
     return None, None
 
+def checkIfPhoto(qr_value):
+    if(os.path.exists("qrphoto.jpg")):
+        os.remove("qrphoto.jpg")
+    if(vali.url(qr_value)):
+        img_data = requests.get(qr_value).content
+        with open('qrphoto.jpg', 'wb') as handler:
+            handler.write(img_data)
+
 def gen():
     cap = cv2.VideoCapture(0)
     counter=0
@@ -80,11 +89,8 @@ def gen():
             if(value != last_qr_value):
                 last_qr_value = value
                 text_start=0
-
-                if(vali.url(last_qr_value)):
-                    img_data = requests.get(last_qr_value).content
-                    with open('qrphoto.jpg', 'wb') as handler:
-                        handler.write(img_data)
+                checkIfPhoto(last_qr_value)
+               
                 print(last_qr_value)
 
             if(not vali.url(last_qr_value)):
@@ -97,8 +103,17 @@ def gen():
                 text_position = [corner1[0], corner1[1]-10]
                 frame = cv2.putText(frame, text_segment, text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255), 1 ,cv2.LINE_AA)
             else:
-                pass
-
+                try:
+                    
+                    qrphoto = cv2.imread("qrphoto.jpg")
+                    qr_region = frame[corner1[1]:corner2[1], corner1[0]:corner2[0]]
+                    overlay_resized = cv2.resize(qrphoto, (qr_region.shape[1], qr_region.shape[0]))
+                    alpha = 1  # waga grafiki
+                    beta = 1- alpha  # waga fragmentu klatki z kamery
+                    overlay = cv2.addWeighted(qr_region, beta, overlay_resized, alpha, 0)
+                    frame[corner1[1]:corner2[1], corner1[0]:corner2[0]] = overlay
+                except:
+                    pass
             frame = cv2.rectangle(frame,corner1, corner2  ,(255, 0, 255), 2)
 
 

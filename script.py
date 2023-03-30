@@ -1,6 +1,10 @@
 import cv2
 import numpy as np
 from flask import Flask, Response
+import validators as vali
+import requests 
+
+
 
 fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
 frame_size = (1280, 720)  # Przyjmujemy rozmiar klatki 640x480 pikseli
@@ -44,17 +48,18 @@ def detectQR(frame):
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     value, points, straight_qrcode = detect.detectAndDecode(frame)
     if(value != ""):
-        print(value)
-        #print(points[0])
-        #print("\n")
-        return(points[0])
-    return(None)
+        #print(value)
+
+        return value, points[0]
+    return None, None
 
 def gen():
     cap = cv2.VideoCapture(0)
     counter=0
     points = None
-
+    last_qr_value = None
+    text_segment = None
+    text_start=0
     while cap.isOpened():
         ret, frame = cap.read()
         #points= detectQR(frame)
@@ -63,18 +68,41 @@ def gen():
             
         counter = (counter +1)%10
         
-        points= detectQR(frame)
+        
+
+        value, points= detectQR(frame)
 
             
         if points is not None:
 
             corner1= (points[0].astype(int)) -5
             corner2 = (points[2].astype(int)) +5
+            if(value != last_qr_value):
+                last_qr_value = value
+                text_start=0
 
+                if(vali.url(last_qr_value)):
+                    img_data = requests.get(last_qr_value).content
+                    with open('qrphoto.jpg', 'wb') as handler:
+                        handler.write(img_data)
+                print(last_qr_value)
 
+            if(not vali.url(last_qr_value)):
+                text_end = lambda start : min(start+10, len(last_qr_value))
+                text_segment = last_qr_value[text_start:text_end(text_start)]
+                
+                if(counter%2 ==0 and len(last_qr_value) > 10):
+                    text_start = (text_start + 1)%len(last_qr_value)
+                    print(text_segment)
+                text_position = [corner1[0], corner1[1]-10]
+                frame = cv2.putText(frame, text_segment, text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255), 1 ,cv2.LINE_AA)
+            else:
+                pass
 
             frame = cv2.rectangle(frame,corner1, corner2  ,(255, 0, 255), 2)
-            #print(corner1, corner2)
+
+
+
         cropped_frame = cv2.resize(frame, (new_height, new_height), interpolation=cv2.INTER_AREA)
         copy = cropped_frame.copy()
 

@@ -4,9 +4,9 @@ from flask import Flask, Response
 import validators as vali
 import requests 
 import os
-from multiprocessing import Process
+from concurrent.futures import ThreadPoolExecutor
 
-
+acceptable_formats=(".JPG", ".jpg", ".PNG", ".png", ".JPEG", ".jpeg")
 fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
 frame_size = (1280, 720)  # Przyjmujemy rozmiar klatki 640x480 pikseli
 
@@ -42,6 +42,7 @@ map_y = new_y
 
 
 app = Flask(__name__)
+executor = ThreadPoolExecutor(max_workers=2)
 
 
 def detectQR(frame):
@@ -55,12 +56,16 @@ def detectQR(frame):
     return None, None
 
 def checkIfPhoto(qr_value):
-    if(os.path.exists("qrphoto.jpg")):
-        os.remove("qrphoto.jpg")
     if(vali.url(qr_value)):
-        img_data = requests.get(qr_value).content
-        with open('qrphoto.jpg', 'wb') as handler:
-            handler.write(img_data)
+        response = requests.head(qr_value)
+
+        if(qr_value[-4:] in acceptable_formats or qr_value[-5:] in acceptable_formats):
+            img_data = requests.get(qr_value).content
+            with open('qrphoto.jpg', 'wb') as handler:
+                handler.write(img_data)
+
+def checkIfPhotoAsync(qr_value):
+    executor.submit(checkIfPhoto, qr_value)
 
 def gen():
     cap = cv2.VideoCapture(0)
@@ -71,14 +76,10 @@ def gen():
     text_start=0
     while cap.isOpened():
         ret, frame = cap.read()
-        #points= detectQR(frame)
         if not ret:
             break
             
         counter = (counter +1)%10
-        
-        
-
         value, points= detectQR(frame)
 
             
@@ -88,9 +89,9 @@ def gen():
             corner2 = (points[2].astype(int)) +5
             if(value != last_qr_value):
                 last_qr_value = value
-                text_start=0
-                checkIfPhoto(last_qr_value)
-               
+                text_start=0    
+
+                checkIfPhotoAsync(last_qr_value)
                 print(last_qr_value)
 
             if(not vali.url(last_qr_value)):

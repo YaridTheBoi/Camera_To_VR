@@ -44,10 +44,13 @@ map_y = new_y
 app = Flask(__name__)
 executor = ThreadPoolExecutor(max_workers=2)
 
-
+#zamiast filtrow mozna brac te smart qr, i sprawdzac czy sa redirectem i na tym sprawdzac
 def detectQR(frame):
     detect = cv2.QRCodeDetector()
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    claheFilter= cv2.createCLAHE(clipLimit= .001, tileGridSize=(16,16))
+    frame = claheFilter.apply(frame)
+
     value, points, straight_qrcode = detect.detectAndDecode(frame)
     if(value != ""):
         #print(value)
@@ -58,11 +61,13 @@ def detectQR(frame):
 def checkIfPhoto(qr_value):
     if(vali.url(qr_value)):
         response = requests.head(qr_value)
-
+        
         if(qr_value[-4:] in acceptable_formats or qr_value[-5:] in acceptable_formats):
             img_data = requests.get(qr_value).content
             with open('qrphoto.jpg', 'wb') as handler:
                 handler.write(img_data)
+            
+            
 
 def checkIfPhotoAsync(qr_value):
     executor.submit(checkIfPhoto, qr_value)
@@ -94,7 +99,7 @@ def gen():
                 checkIfPhotoAsync(last_qr_value)
                 print(last_qr_value)
 
-            if(not vali.url(last_qr_value)):
+            if(not last_qr_value[-4:] in acceptable_formats or last_qr_value[-5:] in acceptable_formats):
                 text_end = lambda start : min(start+10, len(last_qr_value))
                 text_segment = last_qr_value[text_start:text_end(text_start)]
                 

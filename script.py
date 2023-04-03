@@ -10,6 +10,11 @@ acceptable_formats=(".JPG", ".jpg", ".PNG", ".png", ".JPEG", ".jpeg")
 fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
 frame_size = (1280, 720)  # Przyjmujemy rozmiar klatki 640x480 pikseli
 
+sharpen_filter = np.array([[0,-1, 0],[-1,5,-1],[0,-1,0]])
+alpha = 2.2
+beta = 0
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(25,25))
+
 new_height = frame_size[1]
 
 
@@ -41,22 +46,61 @@ map_x = new_x
 map_y = new_y
 
 
+
+
 app = Flask(__name__)
 executor = ThreadPoolExecutor(max_workers=2)
 
 #zamiast filtrow mozna brac te smart qr, i sprawdzac czy sa redirectem i na tym sprawdzac
 def detectQR(frame):
     detect = cv2.QRCodeDetector()
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    claheFilter= cv2.createCLAHE(clipLimit= .001, tileGridSize=(16,16))
-    frame = claheFilter.apply(frame)
 
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    _, frame = cv2.threshold(frame, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    frame = cv2.filter2D(frame, -1, sharpen_filter)
+    frame = 255-frame
     value, points, straight_qrcode = detect.detectAndDecode(frame)
+
     if(value != ""):
         #print(value)
-
+        # cv2.imshow('QR', frame)
+        # cv2.waitKey()
+        # cv2.destroyAllWindows()
         return value, points[0]
     return None, None
+
+
+
+def detectQRPreview():
+    cap = cv2.VideoCapture(0)
+    while cap.isOpened():
+        ret, frame = cap.read()
+        
+        
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # top_hat = cv2.morphologyEx(frame, cv2.MORPH_TOPHAT, kernel)
+        # black_hat = cv2.morphologyEx(frame, cv2.MORPH_BLACKHAT, kernel)
+        # opening = cv2.morphologyEx(frame, cv2.MORPH_OPEN, kernel)
+
+
+        # frame = frame+ top_hat -black_hat + opening
+
+        
+
+        _, frame = cv2.threshold(frame, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        frame = cv2.filter2D(frame, -1, sharpen_filter)
+
+        frame = 255-frame
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        
+        frame = jpeg.tobytes()
+        yield (b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        
+
 
 def checkIfPhoto(qr_value):
     if(vali.url(qr_value)):
@@ -75,7 +119,10 @@ def checkIfPhotoAsync(qr_value):
 def gen():
     cap = cv2.VideoCapture(0)
     counter=0
+    qrdelay= 10
     points = None
+    qr_points = None
+    qr_value = None
     last_qr_value = None
     text_segment = None
     text_start=0
@@ -86,14 +133,24 @@ def gen():
             
         counter = (counter +1)%10
         value, points= detectQR(frame)
-
+        if(points is None and qrdelay>0) :
+            qrdelay = (qrdelay-1)
+        elif (qrdelay == 0 ):
+            qrdelay = 10
+            qr_points = None
+            qr_value = None
+        else: 
+            qrdelay =  10
+            qr_points = points
+            qr_value = value
             
-        if points is not None:
+        
+        if qr_points is not None:
 
-            corner1= (points[0].astype(int)) -5
-            corner2 = (points[2].astype(int)) +5
-            if(value != last_qr_value):
-                last_qr_value = value
+            corner1= (qr_points[0].astype(int)) -5
+            corner2 = (qr_points[2].astype(int)) +5
+            if(qr_value != last_qr_value):
+                last_qr_value = qr_value
                 text_start=0    
 
                 checkIfPhotoAsync(last_qr_value)
@@ -141,6 +198,12 @@ def gen():
 def index():
     return Response(gen(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/qr-vision')
+def qrVision():
+    return Response(detectQRPreview(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)

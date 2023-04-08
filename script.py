@@ -22,7 +22,8 @@ center = (new_height // 2, new_height // 2)
 
 
 radius = min(center[0], center[1])
-strength = 0.8
+strength = 0.85
+
 
 
 map_x, map_y = np.meshgrid(np.arange(new_height), np.arange(new_height))
@@ -80,14 +81,7 @@ def detectQRPreview():
         
         
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # top_hat = cv2.morphologyEx(frame, cv2.MORPH_TOPHAT, kernel)
-        # black_hat = cv2.morphologyEx(frame, cv2.MORPH_BLACKHAT, kernel)
-        # opening = cv2.morphologyEx(frame, cv2.MORPH_OPEN, kernel)
-
-
-        # frame = frame+ top_hat -black_hat + opening
-
-        
+       
 
         _, frame = cv2.threshold(frame, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
@@ -184,10 +178,10 @@ def gen():
         cropped_frame = cv2.resize(frame, (new_height, new_height), interpolation=cv2.INTER_AREA)
         copy = cropped_frame.copy()
 
-        fisheye1 = cv2.remap(cropped_frame, map_x, map_y, cv2.INTER_LINEAR)
-        fisheye2 = cv2.remap(copy, map_x, map_y, cv2.INTER_LINEAR)
+        #fisheye1 = cv2.remap(cropped_frame, map_x, map_y, cv2.INTER_LINEAR)
+        #fisheye2 = cv2.remap(copy, map_x, map_y, cv2.INTER_LINEAR)
 
-        resize_copy = cv2.hconcat([fisheye1, fisheye2])
+        resize_copy = cv2.hconcat([copy, copy])
 
         ret, jpeg = cv2.imencode('.jpg', resize_copy)
         frame = jpeg.tobytes()
@@ -206,4 +200,4 @@ def qrVision():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='192.168.1.18')

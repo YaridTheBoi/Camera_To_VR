@@ -1,232 +1,165 @@
 import cv2
 import numpy as np
-from flask import Flask, Response
 import validators as vali
 import requests 
 import os
+import kivy
+kivy.require('1.11.1')  # wersja Kivy
+from kivy.app import App
+from kivy.uix.image import Image
+from kivy.clock import Clock
+from kivy.graphics.texture import Texture
 from concurrent.futures import ThreadPoolExecutor
 
-acceptable_formats=(".JPG", ".jpg", ".PNG", ".png", ".JPEG", ".jpeg")
-fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
-frame_size = (1280, 720)  # Przyjmujemy rozmiar klatki 640x480 pikseli
 
 
-#wyostrzanie do qr
-sharpen_filter = np.array([[0,-1, 0],[-1,5,-1],[0,-1,0]])
-alpha = 2.2
-beta = 0
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(25,25))
+class MainApp(App):
 
+    def detectQR(self,frame):
+        detect = cv2.QRCodeDetector()
 
-
-
-
-# Znieksztalcenie vr v1
-new_height = frame_size[1]
-center = (new_height // 2, new_height // 2)
-
-radius = min(center[0], center[1])
-strength = 0.8
-
-map_x, map_y = np.meshgrid(np.arange(new_height), np.arange(new_height))
-
-map_x = map_x.astype(np.float32)
-map_y = map_y.astype(np.float32)
-
-map_x -= center[0]
-map_y -= center[1]
-
-dist = np.sqrt(map_x ** 2 + map_y ** 2)
-
-theta = np.arctan2(map_y, map_x)
-
-new_dist = dist ** strength * radius / (radius - dist * strength)
-
-new_x = new_dist * np.cos(theta) + center[0]
-new_y = new_dist * np.sin(theta) + center[1]
-
-map_x = new_x
-map_y = new_y
-
-
-#Zniekszatlcenie vr v2:
-K = np.array([[1.0, 0, 0],
-            [0, 1.0, 0],
-            [0, 0, 1.0]], dtype=np.float32)
-
-D = np.array([0,0,0, 0.0], dtype=np.float32)
-
-# Przetwarzanie obrazu
-def undistort(frame):
-    h, w = frame.shape[:2]
-    newcameramtx, roi = cv2.getOptimalNewCameraMatrix(K, D, (w,h), 1, (w,h))
-
-    # Wykonanie zniekształcenia
-    undistorted = cv2.undistort(frame, K, D, None, newcameramtx)
-    return undistorted
-
-
-app = Flask(__name__)
-executor = ThreadPoolExecutor(max_workers=2)
-
-#zamiast filtrow mozna brac te smart qr, i sprawdzac czy sa redirectem i na tym sprawdzac
-def detectQR(frame):
-    detect = cv2.QRCodeDetector()
-
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    
-    _, frame = cv2.threshold(frame, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-    frame = cv2.filter2D(frame, -1, sharpen_filter)
-    frame = 255-frame
-    value, points, straight_qrcode = detect.detectAndDecode(frame)
-
-    if(value != ""):
-        #print(value)
-        # cv2.imshow('QR', frame)
-        # cv2.waitKey()
-        # cv2.destroyAllWindows()
-        return value, points[0]
-    return None, None
-
-
-
-def detectQRPreview():
-    cap = cv2.VideoCapture(0)
-    while cap.isOpened():
-        ret, frame = cap.read()
-        
-        
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         _, frame = cv2.threshold(frame, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-        frame = cv2.filter2D(frame, -1, sharpen_filter)
-
+        frame = cv2.filter2D(frame, -1, self.sharpen_filter)
         frame = 255-frame
-        ret, jpeg = cv2.imencode('.jpg', frame)
-        
-        frame = jpeg.tobytes()
-        yield (b'--frame\r\n'
-            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        
+        value, points, straight_qrcode = detect.detectAndDecode(frame)
 
+        if(value != ""):
+            #print(value)
+            # cv2.imshow('QR', frame)
+            # cv2.waitKey()
+            # cv2.destroyAllWindows()
+            return value, points[0]
+        return None, None
 
-
-def checkIfPhoto(qr_value):
-    if(vali.url(qr_value)):
-        response = requests.head(qr_value)
-        
-        if(qr_value[-4:] in acceptable_formats or qr_value[-5:] in acceptable_formats):
-            img_data = requests.get(qr_value).content
-            with open('qrphoto.jpg', 'wb') as handler:
-                handler.write(img_data)
+    def checkIfPhoto(self, qr_value):
+        if(vali.url(qr_value)):
+            response = requests.head(qr_value)
             
+            if(qr_value[-4:] in self.acceptable_formats or qr_value[-5:] in self.acceptable_formats):
+                img_data = requests.get(qr_value).content
+                with open('qrphoto.jpg', 'wb') as handler:
+                    handler.write(img_data)
+                
+                
+
+    def checkIfPhotoAsync(self, qr_value):
+        self.executor.submit(self.checkIfPhoto, qr_value)
+
+    def applyQROverlay(self, frame, last_qr_value,  corner1, corner2, counter):
+        if(not last_qr_value[-4:] in self.acceptable_formats or last_qr_value[-5:] in self.acceptable_formats):
+            self.text_end = lambda start : min(start+10, len(last_qr_value))
+            self.text_segment = last_qr_value[self.text_start:self.text_end(self.text_start)]
             
+            if(counter%2 ==0 and len(last_qr_value) > 10):
+                self.text_start = (self.text_start + 1)%len(last_qr_value)
+                print(self.text_segment)
+            self.text_position = [corner1[0], corner1[1]-10]
+            frame = cv2.putText(frame, self.text_segment, self.text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255), 1 ,cv2.LINE_AA)
+        else:
+            try:
+                self.qrphoto = cv2.imread("qrphoto.jpg")
+                qr_region = frame[corner1[1]:corner2[1], corner1[0]:corner2[0]]
+                overlay_resized = cv2.resize(self.qrphoto, (qr_region.shape[1], qr_region.shape[0]))
+                alpha = 1  # waga grafiki
+                beta = 1- alpha  # waga fragmentu klatki z kamery
+                overlay = cv2.addWeighted(qr_region, beta, overlay_resized, alpha, 0)
+                frame[corner1[1]:corner2[1], corner1[0]:corner2[0]] = overlay
+            except:
+                pass
+        frame = cv2.rectangle(frame,corner1, corner2  ,(255, 0, 255), 2)
 
-def checkIfPhotoAsync(qr_value):
-    executor.submit(checkIfPhoto, qr_value)
-
-def applyQROverlay(frame, last_qr_value,  corner1, corner2, counter):
-    if(not last_qr_value[-4:] in acceptable_formats or last_qr_value[-5:] in acceptable_formats):
-        text_end = lambda start : min(start+10, len(last_qr_value))
-        text_segment = last_qr_value[text_start:text_end(text_start)]
-        
-        if(counter%2 ==0 and len(last_qr_value) > 10):
-            text_start = (text_start + 1)%len(last_qr_value)
-            print(text_segment)
-        text_position = [corner1[0], corner1[1]-10]
-        frame = cv2.putText(frame, text_segment, text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255), 1 ,cv2.LINE_AA)
-    else:
-        try:
-            
-            qrphoto = cv2.imread("qrphoto.jpg")
-            qr_region = frame[corner1[1]:corner2[1], corner1[0]:corner2[0]]
-            overlay_resized = cv2.resize(qrphoto, (qr_region.shape[1], qr_region.shape[0]))
-            alpha = 1  # waga grafiki
-            beta = 1- alpha  # waga fragmentu klatki z kamery
-            overlay = cv2.addWeighted(qr_region, beta, overlay_resized, alpha, 0)
-            frame[corner1[1]:corner2[1], corner1[0]:corner2[0]] = overlay
-        except:
-            pass
-    frame = cv2.rectangle(frame,corner1, corner2  ,(255, 0, 255), 2)
-
-    return frame
+        return frame
 
 
-def gen():
-    cap = cv2.VideoCapture(0)
-    counter=0
-    qrdelay= 10
-    points = None
-    qr_points = None
-    qr_value = None
-    last_qr_value = None
-    text_segment = None
-    text_start=0
-    frame_offset = 50
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-            
-        counter = (counter +1)%10
-        value, points= detectQR(frame)
-        if(points is None and qrdelay>0) :
-            qrdelay = (qrdelay-1)
-        elif (qrdelay == 0 ):
-            qrdelay = 10
-            qr_points = None
-            qr_value = None
+
+
+
+    def gen(self, frame):
+        self.counter = (self.counter +1)%10
+        value, points= self.detectQR(frame)
+        if(points is None and self.qrdelay>0) :
+            self.qrdelay = (self.qrdelay-1)
+        elif (self.qrdelay == 0 ):
+            self.qrdelay = 10
+            self.qr_points = None
+            self.qr_value = None
         else: 
-            qrdelay =  10
-            qr_points = points
-            qr_value = value
+            self.qrdelay =  10
+            self.qr_points = points
+            self.qr_value = value
             
         
-        if qr_points is not None:
+        if self.qr_points is not None:
 
-            corner1= (qr_points[0].astype(int)) -5
-            corner2 = (qr_points[2].astype(int)) +5
-            if(qr_value != last_qr_value):
-                last_qr_value = qr_value
-                text_start=0    
+            corner1= (self.qr_points[0].astype(int)) -5
+            corner2 = (self.qr_points[2].astype(int)) +5
+            if(self.qr_value != self.last_qr_value):
+                self.last_qr_value = self.qr_value
+                self.text_start=0    
 
-                checkIfPhotoAsync(last_qr_value)
-                print(last_qr_value)
+                self.checkIfPhotoAsync(self.last_qr_value)
+                print(self.last_qr_value)
 
-            frame = applyQROverlay(frame, last_qr_value, corner1, corner2, counter)
+            frame = self.applyQROverlay(frame, self.last_qr_value, corner1, corner2, self.counter)
 
 
-        cropped_frame = cv2.resize(frame, (new_height-frame_offset, new_height-frame_offset), interpolation=cv2.INTER_AREA)
+        cropped_frame = cv2.resize(frame, (self.new_height-self.frame_offset, self.new_height-self.frame_offset), interpolation=cv2.INTER_AREA)
         
-        vr_feed = np.full((new_height, new_height,3), 0)
+        vr_feed = np.full((self.new_height, self.new_height,3), 0)
 
-        vr_feed[frame_offset//2: frame_offset//2+cropped_frame.shape[0], frame_offset//2:frame_offset//2+cropped_frame.shape[1]] = cropped_frame
+        vr_feed[self.frame_offset//2: self.frame_offset//2+cropped_frame.shape[0], self.frame_offset//2:self.frame_offset//2+cropped_frame.shape[1]] = cropped_frame
         
-        
-        #fisheye1 = cv2.remap(cropped_frame, map_x, map_y, cv2.INTER_LINEAR)
-        #resize_copy = cv2.hconcat([fisheye1, fisheye1])
-        #resize_copy = np.hstack((cropped_frame, cropped_frame))
-
         vr_feed = np.hstack((vr_feed, vr_feed))
 
 
-        ret, jpeg = cv2.imencode('.jpg', vr_feed)
-        frame = jpeg.tobytes()
-        yield (b'--frame\r\n'
-                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
-@app.route('/')
-def index():
-    return Response(gen(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/qr-vision')
-def qrVision():
-    return Response(detectQRPreview(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        return vr_feed
 
 
+    def build(self):
+
+
+        self.acceptable_formats=(".JPG", ".jpg", ".PNG", ".png", ".JPEG", ".jpeg")
+        self.fps = 25.0  # Przyjmujemy 30 klatek na sekundę jako standard
+        self.frame_size = (1280, 720)  # Przyjmujemy rozmiar klatki 640x480 pikseli
+
+        self.new_height = self.frame_size[1]
+
+        #wyostrzanie do qr
+        self.sharpen_filter = np.array([[0,-1, 0],[-1,5,-1],[0,-1,0]])
+        self.alpha = 2.2
+        self.beta = 0
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(25,25))
+        self.counter=0
+        self.qrdelay= 10
+        self.points = None
+        self.qr_points = None
+        self.qr_value = None
+        self.last_qr_value = None
+        self.text_segment = None
+        self.text_start=0
+        self.frame_offset = 50
+        self.capture = cv2.VideoCapture(0)
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
+        self.my_image = Image()
+        Clock.schedule_interval(self.update, 1.0 / 30.0)
+        return self.my_image
+
+    def update(self, dt):
+        ret, frame = self.capture.read()
+        if ret:
+            frame = self.gen(frame)
+            frame = frame.astype(np.uint8)
+
+            buf1 = cv2.flip(frame, 0)
+            buf = buf1.tostring()
+            texture1 = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt='bgr')
+            texture1.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
+            self.my_image.texture = texture1
 
 if __name__ == '__main__':
-    app.run(debug=True, host='192.168.1.18')
+    app = MainApp()
+    app.run()
